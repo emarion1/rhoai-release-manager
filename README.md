@@ -2,7 +2,7 @@
 
 AI-powered release planning and tracking dashboard for Red Hat OpenShift AI (RHOAI).
 
-**Live Dashboard:** https://emarion1.github.io/rhoai-release-manager/release-manager.html
+**[🔗 Live Dashboard](https://emarion1.github.io/rhoai-release-manager/release-manager.html)**
 
 ## Features
 
@@ -16,7 +16,7 @@ AI-powered release planning and tracking dashboard for Red Hat OpenShift AI (RHO
 
 ### View the Dashboard
 
-No installation needed! Just visit the live dashboard:
+No installation needed! Just visit the **[live dashboard](https://emarion1.github.io/rhoai-release-manager/release-manager.html)**.
 
 ```
 https://emarion1.github.io/rhoai-release-manager/release-manager.html

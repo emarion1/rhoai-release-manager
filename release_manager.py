@@ -2558,7 +2558,7 @@ def main():
         optimized_plan=optimized_plan_result
     )
 
-    output_file = "/workspace/artifacts/release-manager.html"
+    output_file = "release-manager.html"
     with open(output_file, 'w') as f:
         f.write(html_content)
 
@@ -2566,10 +2566,9 @@ def main():
     print()
     print("=" * 70)
     print("Next steps:")
-    print("  1. Download release-manager.html from /workspace/artifacts/")
-    print("  2. Open it in your browser")
-    print("  3. Use 'Draft Release Plans' tab to view AI-recommended roadmaps")
-    print("  4. Use 'Track Current Releases' tab to monitor progress")
+    print("  1. Open release-manager.html in your browser")
+    print("  2. Use 'Draft Release Plans' tab to view AI-recommended roadmaps")
+    print("  3. Use 'Track Current Releases' tab to monitor progress")
     print("=" * 70)
 
 

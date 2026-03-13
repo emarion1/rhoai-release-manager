@@ -1,10 +1,10 @@
-# Red Hat AI Products Release Planner - Quick Usage Guide
+# RHOAI Release Manager - Quick Usage Guide
 
 ## For Users (View Only)
 
 **Access the live dashboard:**
 ```
-https://emarion1.github.io/redhat-ai-release-planner/release-manager.html
+https://emarion1.github.io/rhoai-release-manager/release-manager.html
 ```
 
 No installation needed - just open in your browser!
@@ -53,8 +53,8 @@ No installation needed - just open in your browser!
 
 ```bash
 # Clone repo (first time only)
-git clone https://github.com/emarion1/redhat-ai-release-planner.git
-cd redhat-ai-release-planner
+git clone https://github.com/emarion1/rhoai-release-manager.git
+cd rhoai-release-manager
 
 # Quick start (generates and opens dashboard)
 export JIRA_TOKEN='your-token'

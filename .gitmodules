@@ -1,3 +1,0 @@
-[submodule "lib/release_fit_predictor"]
-	path = lib/release_fit_predictor
-	url = git@github.com:ahinek/Release_Fit_Predictor.git

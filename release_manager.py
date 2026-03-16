@@ -236,6 +236,14 @@ def parse_features(issues, ranking):
         key = issue["key"]
         fields = issue["fields"]
 
+        # DEBUG: Log specific issues for investigation
+        debug_keys = {"RHAISTRAT-1183", "RHAISTRAT-1163", "RHAISTRAT-248"}
+        if key in debug_keys:
+            fv_raw = fields.get("fixVersions", [])
+            tv_raw = fields.get(FIELD_TARGET_VERSION)
+            print(f"   DEBUG {key}: fixVersions={json.dumps(fv_raw, default=str)[:300]}")
+            print(f"   DEBUG {key}: targetVersion={json.dumps(tv_raw, default=str)[:300]}")
+
         # Parse fix versions (committed releases)
         fix_versions = []
         for fv in fields.get("fixVersions", []):

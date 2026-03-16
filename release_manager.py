@@ -1544,7 +1544,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         const statusClass = 'status-' + f.status.toLowerCase().replace(/[^a-z]/g, '');
                         const priorityClass = 'priority-' + f.priority.toLowerCase();
                         const typeBadge = f.issue_type === 'Initiative'
-                            ? '<span style="display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#e3fcef;color:#006644;margin-left:6px;">Internal</span>'
+                            ? '<span style="display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#e3fcef;color:#006644;margin-left:6px;">Initiative</span>'
                             : '<span style="display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#deebff;color:#0747a6;margin-left:6px;">Feature</span>';
                         html += `
                                     <tr>

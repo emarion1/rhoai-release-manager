@@ -236,30 +236,33 @@ def parse_features(issues, ranking):
         key = issue["key"]
         fields = issue["fields"]
 
-        # DEBUG: Log specific issues for investigation
-        debug_keys = {"RHAISTRAT-1183", "RHAISTRAT-1163", "RHAISTRAT-248"}
-        if key in debug_keys:
-            fv_raw = fields.get("fixVersions", [])
-            tv_raw = fields.get(FIELD_TARGET_VERSION)
-            print(f"   DEBUG {key}: fixVersions={json.dumps(fv_raw, default=str)[:300]}")
-            print(f"   DEBUG {key}: targetVersion={json.dumps(tv_raw, default=str)[:300]}")
-
-        # Parse fix versions (committed releases)
+        # Parse fix versions (committed releases) — only RHOAI versions
         fix_versions = []
         for fv in fields.get("fixVersions", []):
-            fix_versions.append(fv["name"])
+            name = fv["name"]
+            if name.lower().startswith("rhoai"):
+                fix_versions.append(name)
 
-        # Parse target version (planned release)
+        # Parse target version (planned release) — only RHOAI versions
         target_version = None
         if fields.get(FIELD_TARGET_VERSION):
             tv_field = fields[FIELD_TARGET_VERSION]
             # Handle both dict and list formats
             if isinstance(tv_field, dict):
-                target_version = tv_field.get("name")
+                name = tv_field.get("name", "")
+                if name.lower().startswith("rhoai"):
+                    target_version = name
             elif isinstance(tv_field, list) and len(tv_field) > 0:
-                target_version = tv_field[0].get("name") if isinstance(tv_field[0], dict) else str(tv_field[0])
+                # Find first RHOAI version in the list
+                for tv in tv_field:
+                    name = tv.get("name", "") if isinstance(tv, dict) else str(tv)
+                    if name.lower().startswith("rhoai"):
+                        target_version = name
+                        break
             else:
-                target_version = str(tv_field) if tv_field else None
+                name = str(tv_field) if tv_field else ""
+                if name.lower().startswith("rhoai"):
+                    target_version = name
 
         # Parse target end date
         target_end_date = None

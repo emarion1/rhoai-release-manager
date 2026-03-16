@@ -606,6 +606,7 @@
 
     <script>
         // Store all data
+        const jiraBaseUrl = "https://redhat.atlassian.net";
         const allReleases = {};
         const releaseMetrics = {};
         const capacity = {
@@ -1091,7 +1092,7 @@
                         const priorityClass = 'priority-' + f.priority.toLowerCase();
                         html += `
                                     <tr>
-                                        <td><a href="https://issues.redhat.com/browse/${f.key}" target="_blank">${f.key}</a></td>
+                                        <td><a href="${jiraBaseUrl}/browse/${f.key}" target="_blank">${f.key}</a></td>
                                         <td>${f.summary}</td>
                                         <td><span class="status-badge ${statusClass}">${f.status}</span></td>
                                         <td class="${priorityClass}">${f.priority}</td>

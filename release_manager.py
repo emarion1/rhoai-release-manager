@@ -157,7 +157,7 @@ def get_all_features():
     """Get all RHAISTRAT features with status, points, versions"""
     print(f"📥 Querying all {PROJECT} features...")
 
-    jql = f"project = {PROJECT} AND type IN (Feature, Epic, Story)"
+    jql = f"project = {PROJECT} AND type IN (Feature, Initiative, Epic, Story)"
 
     all_issues = []
     max_results = 100
@@ -166,7 +166,7 @@ def get_all_features():
     while True:
         params = {
             "jql": jql,
-            "fields": f"key,summary,status,priority,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
+            "fields": f"key,summary,status,priority,issuetype,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
             "maxResults": max_results
         }
         if next_page_token:
@@ -285,11 +285,15 @@ def parse_features(issues, ranking):
         in_plan = key in ranking
         rank = ranking.get(key, 9999)  # Use plan ranking or default to end
 
+        # Get issue type
+        issue_type = fields.get("issuetype", {}).get("name", "Feature")
+
         feature = {
             "key": key,
             "summary": fields["summary"],
             "status": fields["status"]["name"],
             "priority": fields["priority"]["name"] if fields.get("priority") else "Normal",
+            "issue_type": issue_type,
             "points": points,
             "original_points": original_points,
             "auto_sized": points != original_points,
@@ -1539,9 +1543,12 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                     features.forEach(f => {
                         const statusClass = 'status-' + f.status.toLowerCase().replace(/[^a-z]/g, '');
                         const priorityClass = 'priority-' + f.priority.toLowerCase();
+                        const typeBadge = f.issue_type === 'Initiative'
+                            ? '<span style="display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#e3fcef;color:#006644;margin-left:6px;">Internal</span>'
+                            : '<span style="display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;background:#deebff;color:#0747a6;margin-left:6px;">Feature</span>';
                         html += `
                                     <tr>
-                                        <td><a href="${jiraBaseUrl}/browse/${f.key}" target="_blank">${f.key}</a></td>
+                                        <td><a href="${jiraBaseUrl}/browse/${f.key}" target="_blank">${f.key}</a>${typeBadge}</td>
                                         <td>${f.summary}</td>
                                         <td><span class="status-badge ${statusClass}">${f.status}</span></td>
                                         <td class="${priorityClass}">${f.priority}</td>

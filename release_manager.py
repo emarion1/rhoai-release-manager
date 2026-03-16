@@ -236,14 +236,15 @@ def parse_features(issues, ranking):
         key = issue["key"]
         fields = issue["fields"]
 
-        # DEBUG: Print first issue's raw fields to diagnose v3 API differences
-        if idx == 0:
-            print(f"\n🔍 DEBUG: First issue raw fields for {key}:")
-            print(f"   All field keys: {sorted(fields.keys())}")
-            for field_name, field_value in sorted(fields.items()):
-                if field_value is not None and field_value != [] and field_value != "" and field_value != {}:
-                    print(f"   {field_name}: {json.dumps(field_value, default=str)[:300]}")
-            print()
+        # DEBUG: Print field diagnostics for issues with fixVersions
+        if idx == 0 or (fields.get("fixVersions") and len(fields.get("fixVersions", [])) > 0 and idx < 50):
+            if fields.get("fixVersions") and len(fields.get("fixVersions", [])) > 0:
+                print(f"\n🔍 DEBUG: Issue {key} has fixVersions: {json.dumps(fields['fixVersions'], default=str)[:300]}")
+                # Print all non-null customfields to find story points and target version
+                for field_name, field_value in sorted(fields.items()):
+                    if field_name.startswith("customfield_") and field_value is not None and field_value != [] and field_value != "" and field_value != {}:
+                        print(f"   {field_name}: {json.dumps(field_value, default=str)[:200]}")
+                print()
 
         # Parse fix versions (committed releases)
         fix_versions = []

@@ -318,8 +318,7 @@ def group_features_by_release(features):
     releases = defaultdict(lambda: {
         "EA1": [],
         "EA2": [],
-        "GA": [],
-        "Unspecified": []  # Capitalized for display
+        "GA": []
     })
 
     unscheduled = []
@@ -353,8 +352,8 @@ def group_features_by_release(features):
             elif "ga" in scheduled_lower:
                 event = "GA"
             else:
-                # No event specified - put in Unspecified so it shows up
-                event = "Unspecified"
+                # No event specified - default to GA
+                event = "GA"
 
             releases[release_num][event].append(feature)
         else:
@@ -1518,8 +1517,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 `;
             }
 
-            // Show features by event (including Unspecified for features without specific event)
-            for (const event of ['EA1', 'EA2', 'GA', 'Unspecified']) {
+            for (const event of ['EA1', 'EA2', 'GA']) {
                 const features = releaseData[event];
                 if (features && features.length > 0) {
                     html += `
@@ -1587,8 +1585,8 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         <p><strong>Target Version:</strong> Feature is <em>intended</em> for this release event but not yet committed</p>
                     </div>
                     <div class="info-card">
-                        <h4>Unspecified Events</h4>
-                        <p>Features with only a version number (e.g., "3.5") but no specific event (EA1/EA2/GA) appear in the "Unspecified" section.</p>
+                        <h4>Default to GA</h4>
+                        <p>Features with only a version number (e.g., "3.5") but no specific event (EA1/EA2) default to the GA release event.</p>
                     </div>
                 `,
                 'capacity': `
@@ -2352,7 +2350,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 <p>Monitor progress on scheduled releases (3.4, 3.5, etc.)</p>
                 <ul>
                     <li>Select a release cycle from the dropdown</li>
-                    <li>View all 3 events: EA1, EA2, GA (plus Unspecified)</li>
+                    <li>View all 3 events: EA1, EA2, GA</li>
                     <li>See metrics: feature count, story points, capacity status</li>
                     <li>Review feature lists with status and priority</li>
                 </ul>

@@ -166,7 +166,7 @@ def get_all_features():
     while True:
         params = {
             "jql": jql,
-            "fields": f"key,summary,status,priority,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
+            "fields": "*all",
             "maxResults": max_results
         }
         if next_page_token:
@@ -239,9 +239,10 @@ def parse_features(issues, ranking):
         # DEBUG: Print first issue's raw fields to diagnose v3 API differences
         if idx == 0:
             print(f"\n🔍 DEBUG: First issue raw fields for {key}:")
-            for field_name, field_value in fields.items():
-                if field_value is not None and field_value != [] and field_value != "":
-                    print(f"   {field_name}: {json.dumps(field_value, default=str)[:200]}")
+            print(f"   All field keys: {sorted(fields.keys())}")
+            for field_name, field_value in sorted(fields.items()):
+                if field_value is not None and field_value != [] and field_value != "" and field_value != {}:
+                    print(f"   {field_name}: {json.dumps(field_value, default=str)[:300]}")
             print()
 
         # Parse fix versions (committed releases)

@@ -232,9 +232,17 @@ def parse_features(issues, ranking):
     features = []
     auto_sized_count = 0
 
-    for issue in issues:
+    for idx, issue in enumerate(issues):
         key = issue["key"]
         fields = issue["fields"]
+
+        # DEBUG: Print first issue's raw fields to diagnose v3 API differences
+        if idx == 0:
+            print(f"\n🔍 DEBUG: First issue raw fields for {key}:")
+            for field_name, field_value in fields.items():
+                if field_value is not None and field_value != [] and field_value != "":
+                    print(f"   {field_name}: {json.dumps(field_value, default=str)[:200]}")
+            print()
 
         # Parse fix versions (committed releases)
         fix_versions = []

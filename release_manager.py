@@ -10,6 +10,7 @@ Usage:
 Opens release-manager.html in browser
 """
 
+import base64
 import json
 import os
 import sys
@@ -29,8 +30,9 @@ except ImportError:
         return "Auto-scheduler not available"
 
 # Configuration
-JIRA_BASE_URL = "https://issues.redhat.com"
+JIRA_BASE_URL = "https://redhat.atlassian.net"
 JIRA_TOKEN = os.environ.get("JIRA_TOKEN")
+JIRA_EMAIL = os.environ.get("JIRA_EMAIL")
 PROJECT = "RHAISTRAT"
 PLAN_NAME = "RHOAI Feature Planning and Tracking"
 PLAN_VIEW = "Outcomes & Features (Jeff's View)"
@@ -62,15 +64,17 @@ FEATURE_SIZING = {
 
 def get_jira_headers():
     """Get JIRA API headers"""
-    if not JIRA_TOKEN:
-        print("❌ ERROR: JIRA_TOKEN environment variable not set")
-        print("\nSet your JIRA Personal Access Token:")
-        print("  export JIRA_TOKEN='your-token-here'")
-        print("\nGet token from: https://issues.redhat.com/secure/ViewProfile.jspa")
+    if not JIRA_TOKEN or not JIRA_EMAIL:
+        print("❌ ERROR: JIRA_TOKEN and/or JIRA_EMAIL environment variable not set")
+        print("\nSet your Atlassian Cloud API token and email:")
+        print("  export JIRA_EMAIL='your-email@redhat.com'")
+        print("  export JIRA_TOKEN='your-api-token'")
+        print("\nGet API token from: https://id.atlassian.com/manage-profile/security/api-tokens")
         sys.exit(1)
 
+    credentials = base64.b64encode(f"{JIRA_EMAIL}:{JIRA_TOKEN}".encode()).decode()
     return {
-        "Authorization": f"Bearer {JIRA_TOKEN}",
+        "Authorization": f"Basic {credentials}",
         "Content-Type": "application/json"
     }
 
@@ -1395,6 +1399,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
 
     <script>
         // Store all data
+        const jiraBaseUrl = """ + json.dumps(JIRA_BASE_URL) + """;
         const allReleases = """ + json.dumps(releases, indent=2) + """;
         const releaseMetrics = """ + json.dumps(release_metrics, indent=2) + """;
         const capacity = """ + json.dumps(capacity, indent=2) + """;
@@ -1536,7 +1541,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         const priorityClass = 'priority-' + f.priority.toLowerCase();
                         html += `
                                     <tr>
-                                        <td><a href="https://issues.redhat.com/browse/${f.key}" target="_blank">${f.key}</a></td>
+                                        <td><a href="${jiraBaseUrl}/browse/${f.key}" target="_blank">${f.key}</a></td>
                                         <td>${f.summary}</td>
                                         <td><span class="status-badge ${statusClass}">${f.status}</span></td>
                                         <td class="${priorityClass}">${f.priority}</td>

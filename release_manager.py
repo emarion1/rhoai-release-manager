@@ -236,15 +236,14 @@ def parse_features(issues, ranking):
         key = issue["key"]
         fields = issue["fields"]
 
-        # DEBUG: Print field diagnostics for issues with fixVersions
-        if idx == 0 or (fields.get("fixVersions") and len(fields.get("fixVersions", [])) > 0 and idx < 50):
-            if fields.get("fixVersions") and len(fields.get("fixVersions", [])) > 0:
-                print(f"\n🔍 DEBUG: Issue {key} has fixVersions: {json.dumps(fields['fixVersions'], default=str)[:300]}")
-                # Print all non-null customfields to find story points and target version
-                for field_name, field_value in sorted(fields.items()):
-                    if field_name.startswith("customfield_") and field_value is not None and field_value != [] and field_value != "" and field_value != {}:
-                        print(f"   {field_name}: {json.dumps(field_value, default=str)[:200]}")
-                print()
+        # DEBUG: Log key fields for first 5 issues that have customfield_10855 (target version)
+        if idx < 200 and fields.get("customfield_10855"):
+            tv = fields["customfield_10855"]
+            tv_names = [v.get("name", "?") for v in tv] if isinstance(tv, list) else [str(tv)]
+            sp637 = fields.get("customfield_10637")
+            sp836 = fields.get("customfield_10836")
+            fv = [v["name"] for v in fields.get("fixVersions", [])]
+            print(f"   DEBUG {key}: fixVersions={fv}, cf_10855={tv_names}, cf_10637={sp637}, cf_10836={sp836}")
 
         # Parse fix versions (committed releases)
         fix_versions = []

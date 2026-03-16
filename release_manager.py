@@ -160,19 +160,22 @@ def get_all_features():
     jql = f"project = {PROJECT} AND type IN (Feature, Epic, Story)"
 
     all_issues = []
-    start_at = 0
     max_results = 100
+    next_page_token = None
 
     while True:
+        params = {
+            "jql": jql,
+            "fields": f"key,summary,status,priority,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
+            "maxResults": max_results
+        }
+        if next_page_token:
+            params["nextPageToken"] = next_page_token
+
         response = requests.get(
             f"{JIRA_BASE_URL}/rest/api/3/search/jql",
             headers=get_jira_headers(),
-            params={
-                "jql": jql,
-                "fields": f"key,summary,status,priority,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
-                "startAt": start_at,
-                "maxResults": max_results
-            },
+            params=params,
             timeout=30
         )
 
@@ -184,13 +187,12 @@ def get_all_features():
         issues = data.get("issues", [])
         all_issues.extend(issues)
 
-        total = data.get("total", 0)
-        start_at += max_results
+        print(f"  Retrieved {len(all_issues)} features so far...")
 
-        print(f"  Retrieved {len(all_issues)}/{total} features...")
-
-        if start_at >= total:
+        # Token-based pagination: stop when isLast or no nextPageToken
+        if data.get("isLast", True) or "nextPageToken" not in data:
             break
+        next_page_token = data["nextPageToken"]
 
     print(f"✅ Retrieved {len(all_issues)} total features")
     return all_issues

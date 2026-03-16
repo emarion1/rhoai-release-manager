@@ -165,7 +165,7 @@ def get_all_features():
 
     while True:
         response = requests.get(
-            f"{JIRA_BASE_URL}/rest/api/2/search",
+            f"{JIRA_BASE_URL}/rest/api/3/search/jql",
             headers=get_jira_headers(),
             params={
                 "jql": jql,

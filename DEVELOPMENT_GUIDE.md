@@ -39,7 +39,7 @@ Guide for adding new functionality and customizing the Release Manager.
 1. **Find the field ID in JIRA:**
    ```bash
    # Query JIRA to find field IDs
-   curl -X GET "https://redhat.atlassian.net/rest/api/2/field" \
+   curl -X GET "https://redhat.atlassian.net/rest/api/3/field" \
      -u "$JIRA_EMAIL:$JIRA_TOKEN" | jq '.[].id,.name'
    ```
 
@@ -416,7 +416,7 @@ headers = {
 
 # Test query
 response = requests.get(
-    "https://redhat.atlassian.net/rest/api/2/search",
+    "https://redhat.atlassian.net/rest/api/3/search/jql",
     headers=headers,
     params={
         "jql": "project = RHAISTRAT AND key = RHAISTRAT-1287",
@@ -596,7 +596,7 @@ Update target versions based on planning:
 
 ```python
 def update_jira_target_version(issue_key, target_version):
-    url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}"
+    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}"
     data = {
         "fields": {
             FIELD_TARGET_VERSION: {"name": target_version}
@@ -645,7 +645,7 @@ def get_cached_features():
 
 **For JIRA API questions:**
 - JIRA REST API docs: https://docs.atlassian.com/jira/REST/
-- Field IDs: `curl -u "$JIRA_EMAIL:$JIRA_TOKEN" https://redhat.atlassian.net/rest/api/2/field`
+- Field IDs: `curl -u "$JIRA_EMAIL:$JIRA_TOKEN" https://redhat.atlassian.net/rest/api/3/field`
 - JQL reference: https://support.atlassian.com/jira-software-cloud/docs/use-advanced-search-with-jira-query-language-jql/
 
 **For GitHub Actions questions:**

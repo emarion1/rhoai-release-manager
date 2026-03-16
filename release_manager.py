@@ -37,10 +37,10 @@ PROJECT = "RHAISTRAT"
 PLAN_NAME = "RHOAI Feature Planning and Tracking"
 PLAN_VIEW = "Outcomes & Features (Jeff's View)"
 
-# JIRA Custom Fields
-FIELD_STORY_POINTS = "customfield_12310243"
-FIELD_TARGET_VERSION = "customfield_12319940"
-FIELD_TARGET_END_DATE = "customfield_12313941"  # Target end date for planning
+# JIRA Custom Fields (Atlassian Cloud IDs)
+FIELD_STORY_POINTS = "customfield_10836"
+FIELD_TARGET_VERSION = "customfield_10855"
+FIELD_TARGET_END_DATE = "customfield_10015"  # Target end date for planning
 
 # Capacity guidelines (from PREDICTIVE_RELEASE_CAPACITY_REPORT.md)
 CAPACITY = {
@@ -166,7 +166,7 @@ def get_all_features():
     while True:
         params = {
             "jql": jql,
-            "fields": "*all",
+            "fields": f"key,summary,status,priority,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
             "maxResults": max_results
         }
         if next_page_token:
@@ -236,15 +236,6 @@ def parse_features(issues, ranking):
         key = issue["key"]
         fields = issue["fields"]
 
-        # DEBUG: Log key fields for first 5 issues that have customfield_10855 (target version)
-        if idx < 200 and fields.get("customfield_10855"):
-            tv = fields["customfield_10855"]
-            tv_names = [v.get("name", "?") for v in tv] if isinstance(tv, list) else [str(tv)]
-            sp637 = fields.get("customfield_10637")
-            sp836 = fields.get("customfield_10836")
-            fv = [v["name"] for v in fields.get("fixVersions", [])]
-            print(f"   DEBUG {key}: fixVersions={fv}, cf_10855={tv_names}, cf_10637={sp637}, cf_10836={sp836}")
-
         # Parse fix versions (committed releases)
         fix_versions = []
         for fv in fields.get("fixVersions", []):
@@ -282,7 +273,7 @@ def parse_features(issues, ranking):
         labels = fields.get("labels", [])
 
         # Get story points - AUTO-SIZE if 0 or missing
-        points = fields.get("customfield_12310243") or 0
+        points = fields.get(FIELD_STORY_POINTS) or 0
         original_points = points
 
         if points == 0:

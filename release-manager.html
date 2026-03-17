@@ -788,6 +788,12 @@
     <script>
         // Store all data
         const jiraBaseUrl = "https://redhat.atlassian.net";
+
+        function getJiraSearchUrl(keys) {
+            const jql = 'key in (' + keys.join(', ') + ')';
+            return jiraBaseUrl + '/issues/?jql=' + encodeURIComponent(jql);
+        }
+
         const allReleases = {
   "3.4": {
     "EA1": [
@@ -123551,12 +123557,18 @@
                 `;
             }
 
+            html += `
+                <div style="background: #f0f7ff; border-left: 4px solid #667eea; padding: 8px 14px; margin-bottom: 10px; border-radius: 4px; font-size: 13px; color: #555;">
+                    Click any event heading to open its features in JIRA.
+                </div>
+            `;
+
             for (const event of ['EA1', 'EA2', 'GA']) {
                 const features = releaseData[event];
                 if (features && features.length > 0) {
                     html += `
                         <div class="metric-card" style="grid-column: 1 / -1; margin-top: 10px;">
-                            <h3 style="margin-bottom: 15px;">${event} Features (${features.length})</h3>
+                            <h3 style="margin-bottom: 15px;"><a href="${getJiraSearchUrl(features.map(f => f.key))}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dashed #667eea;">${event} Features (${features.length})</a></h3>
                             <table class="feature-table">
                                 <thead>
                                     <tr>
@@ -123824,7 +123836,11 @@
                 releases[version][event] = activePlan[bucketKey];
             }
 
-            let html = '';
+            let html = `
+                <div style="background: #f0f7ff; border-left: 4px solid #667eea; padding: 8px 14px; margin-bottom: 15px; border-radius: 4px; font-size: 13px; color: #555;">
+                    Click any event heading (EA1, EA2, GA) to open its features in JIRA.
+                </div>
+            `;
             const sortedVersions = Object.keys(releases)
                 .filter(v => parseFloat(v) >= 3.4)
                 .sort((a, b) => parseFloat(a) - parseFloat(b));
@@ -123887,10 +123903,15 @@
 
                         const eventClass = overCapacity ? 'event-over-capacity' : '';
 
+                        const realKeys = [...new Set(eventData.features.map(f => {
+                            if (typeof f === 'object') return f.split_from || f.key;
+                            return f;
+                        }))];
+
                         html += `
                             <div class="${eventClass}" style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid ${statusColor};">
                                 <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #333;">
-                                    ${event} ${statusIcon}
+                                    <a href="${getJiraSearchUrl(realKeys)}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dashed #667eea;">${event} ${statusIcon}</a>
                                     ${overCapacity ? '<span style="font-size:11px;color:#dc3545;font-weight:normal;"> Over limit</span>' : ''}
                                 </h3>
                                 <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">
@@ -123950,7 +123971,7 @@
 
                             html += `<div class="${dimClass}" style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 11px;">`;
                             html += `<div style="font-weight: 600; color: #0052cc; margin-bottom: 2px;">`;
-                            html += `${key}`;
+                            html += `<a href="${jiraBaseUrl}/browse/${lookupKey}" target="_blank" style="color: #0052cc; text-decoration: none;">${key}</a>`;
                             html += ` <span style="background: #667eea; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; margin-left: 4px;">${pts}pts ${size}</span>`;
 
                             // Sizing method badge

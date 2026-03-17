@@ -82,7 +82,7 @@ def auto_schedule_features(features, capacity_guidelines, start_version="3.5", n
 
     # Capacity targets
     target_capacity = capacity_guidelines.get('typical_max', 50)
-    max_capacity = capacity_guidelines.get('aggressive_max', 80)
+    max_capacity = capacity_guidelines.get('maximum', capacity_guidelines.get('aggressive_max', 80))
 
     # Distribute features
     bucket_keys = []
@@ -118,8 +118,10 @@ def auto_schedule_features(features, capacity_guidelines, start_version="3.5", n
                     bucket['capacity_status'] = 'conservative'
                 elif bucket['points'] <= target_capacity:
                     bucket['capacity_status'] = 'typical'
-                elif bucket['points'] <= max_capacity:
+                elif bucket['points'] <= capacity_guidelines.get('aggressive_max', 80):
                     bucket['capacity_status'] = 'aggressive'
+                elif bucket['points'] <= max_capacity:
+                    bucket['capacity_status'] = 'maximum'
                 else:
                     bucket['capacity_status'] = 'over_capacity'
 
@@ -137,6 +139,71 @@ def auto_schedule_features(features, capacity_guidelines, start_version="3.5", n
         # Features that don't fit by RHOAI 3.12 will remain unplanned
 
     return plan, schedule
+
+
+def auto_schedule_features_enhanced(features, capacity_guidelines, start_version="3.5", num_releases=8, enable_splitting=True):
+    """
+    Enhanced auto-scheduler with XL feature splitting support.
+
+    Features with points >= 13 are split into Part 1 (8 pts) + Part 2 (5 pts).
+    Split parts get synthetic keys: {key}-P1, {key}-P2.
+
+    Args:
+        features: List of feature dicts
+        capacity_guidelines: Dict with capacity thresholds
+        start_version: Starting version
+        num_releases: Number of releases to plan
+        enable_splitting: Whether to apply XL splitting
+
+    Returns:
+        Dict with plan, schedule, splits_applied, mode
+    """
+    from copy import deepcopy
+
+    processed_features = []
+    splits_applied = 0
+
+    for feature in features:
+        points = feature.get('points', 0)
+
+        if enable_splitting and points >= 13:
+            # Split XL feature into P1 (8 pts) + P2 (5 pts)
+            base_key = feature["key"]
+
+            part1 = deepcopy(feature)
+            part1["key"] = f"{base_key}-P1"
+            part1["summary"] = f"{feature['summary'][:60]}... (Part 1: Core)"
+            part1["points"] = 8
+            part1["split"] = True
+            part1["split_from"] = base_key
+            part1["split_part"] = 1
+            processed_features.append(part1)
+
+            part2 = deepcopy(feature)
+            part2["key"] = f"{base_key}-P2"
+            part2["summary"] = f"{feature['summary'][:60]}... (Part 2: Extended)"
+            part2["points"] = 5
+            part2["split"] = True
+            part2["split_from"] = base_key
+            part2["split_part"] = 2
+            processed_features.append(part2)
+
+            splits_applied += 1
+        else:
+            feat_copy = deepcopy(feature)
+            feat_copy["split"] = False
+            feat_copy["split_from"] = None
+            feat_copy["split_part"] = None
+            processed_features.append(feat_copy)
+
+    plan, schedule = auto_schedule_features(processed_features, capacity_guidelines, start_version, num_releases)
+
+    return {
+        "plan": plan,
+        "schedule": schedule,
+        "splits_applied": splits_applied,
+        "mode": "optimized" if enable_splitting else "baseline"
+    }
 
 
 def format_plan_summary(plan, schedule):
@@ -167,6 +234,7 @@ def format_plan_summary(plan, schedule):
                 'conservative': '🟢',
                 'typical': '🟡',
                 'aggressive': '🟠',
+                'maximum': '🔴',
                 'over_capacity': '🔴'
             }.get(status, '⚪')
 

@@ -20,12 +20,15 @@ from collections import defaultdict
 
 # Import auto-scheduler
 try:
-    from auto_scheduler import auto_schedule_features, format_plan_summary
+    from auto_scheduler import auto_schedule_features, auto_schedule_features_enhanced, format_plan_summary
 except ImportError:
     # If running standalone, define inline
     def auto_schedule_features(features, capacity, start_version="3.5", num_releases=8):
         """Fallback: returns empty plan"""
         return {}, []
+    def auto_schedule_features_enhanced(features, capacity, start_version="3.5", num_releases=8, enable_splitting=True):
+        """Fallback: returns empty enhanced plan"""
+        return {"plan": {}, "schedule": [], "splits_applied": 0, "mode": "baseline"}
     def format_plan_summary(plan, schedule):
         return "Auto-scheduler not available"
 
@@ -49,7 +52,8 @@ CAPACITY = {
     "conservative_max": 30,
     "typical_max": 50,
     "aggressive_max": 80,
-    "historical_max_release": 140
+    "maximum": 140,
+    "historical_max_release": 140,
 }
 
 # Feature sizing (from FEATURE_SIZING_QUICK_REFERENCE.md)
@@ -286,10 +290,14 @@ def parse_features(issues, ranking):
         # Get story points - AUTO-SIZE if 0 or missing
         points = fields.get(FIELD_STORY_POINTS) or 0
         original_points = points
+        sizing_method = "jira_provided"
+        complexity_score = None
+        sizing_confidence = None
 
         if points == 0:
             priority = fields["priority"]["name"] if fields.get("priority") else "Normal"
             points = estimate_feature_size(fields["summary"], priority)
+            sizing_method = "keyword_heuristic"
             auto_sized_count += 1
 
         # Check if feature is in the plan
@@ -308,6 +316,9 @@ def parse_features(issues, ranking):
             "points": points,
             "original_points": original_points,
             "auto_sized": points != original_points,
+            "sizing_method": sizing_method,
+            "complexity_score": complexity_score,
+            "sizing_confidence": sizing_confidence,
             "fix_versions": fix_versions,
             "target_version": target_version,
             "target_end_date": target_end_date,
@@ -315,7 +326,7 @@ def parse_features(issues, ranking):
             "status_category": status_category,
             "labels": labels,
             "rank": rank,
-            "in_plan": in_plan  # NEW: Track if feature is in the plan
+            "in_plan": in_plan,
         }
 
         features.append(feature)
@@ -396,6 +407,9 @@ def calculate_release_metrics(release_data):
         elif total_points <= CAPACITY["aggressive_max"]:
             capacity_status = "aggressive"
             color = "#ffc107"  # yellow
+        elif total_points <= CAPACITY.get("maximum", 140):
+            capacity_status = "maximum"
+            color = "#dc3545"  # red
         else:
             capacity_status = "over_capacity"
             color = "#dc3545"  # red
@@ -776,6 +790,50 @@ def calculate_efficiency_score(sizing_analysis):
     return min(100, round(score))
 
 
+def build_plan_data(recommended_plan, optimized_plan):
+    """Build unified planData dict for JS embedding."""
+
+    def bucket_to_js(bucket_data, object_format=False):
+        """Convert a plan bucket to JS-friendly format."""
+        if object_format:
+            features_js = []
+            for f in bucket_data["features"]:
+                entry = {
+                    "key": f["key"],
+                    "points": f["points"],
+                    "split": f.get("split", False),
+                }
+                if f.get("split"):
+                    entry["split_from"] = f.get("split_from", "")
+                    entry["split_part"] = f.get("split_part")
+                features_js.append(entry)
+        else:
+            features_js = [{"key": f["key"], "points": f["points"], "split": False} for f in bucket_data["features"]]
+        return {
+            "features": features_js,
+            "points": bucket_data["points"],
+            "capacity_status": bucket_data["capacity_status"],
+        }
+
+    baseline = {}
+    if recommended_plan:
+        for k, v in recommended_plan.items():
+            baseline[k] = bucket_to_js(v, object_format=False)
+
+    optimized = {}
+    splits_applied = 0
+    if optimized_plan and optimized_plan.get("plan"):
+        for k, v in optimized_plan["plan"].items():
+            optimized[k] = bucket_to_js(v, object_format=True)
+        splits_applied = optimized_plan.get("splits_applied", optimized_plan.get("split_count", 0))
+
+    return {
+        "baseline": baseline,
+        "optimized": optimized,
+        "metadata": {"splits_applied": splits_applied},
+    }
+
+
 def generate_html(features, releases, unscheduled, capacity, recommended_plan=None, backlog_analysis=None, optimized_plan=None):
     """Generate interactive HTML release manager"""
 
@@ -787,19 +845,6 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
     release_metrics = {}
     for release_num, release_data in releases.items():
         release_metrics[release_num] = calculate_release_metrics(release_data)
-
-    # Prepare recommended plan for embedding
-    if recommended_plan:
-        # Convert to simpler format for JavaScript
-        recommended_plan_js = {}
-        for bucket_key, bucket_data in recommended_plan.items():
-            recommended_plan_js[bucket_key] = {
-                "features": [f["key"] for f in bucket_data["features"]],
-                "points": bucket_data["points"],
-                "capacity_status": bucket_data["capacity_status"]
-            }
-    else:
-        recommended_plan_js = {}
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -1295,6 +1340,155 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
             background: #f0fff4;
             border-color: #28a745;
         }}
+
+        /* Capacity slider */
+        .capacity-slider-container {{
+            background: white;
+            padding: 20px 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+
+        .capacity-slider {{
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            appearance: none;
+            border-radius: 4px;
+            outline: none;
+            margin: 15px 0;
+        }}
+
+        .capacity-slider::-webkit-slider-thumb {{
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }}
+
+        .slider-labels {{
+            font-size: 11px;
+            color: #666;
+            height: 24px;
+        }}
+
+        .slider-labels span {{
+            padding: 3px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }}
+
+        /* Plan mode toggle */
+        .plan-mode-selector {{
+            display: inline-flex;
+            background: #f0f0f0;
+            border-radius: 8px;
+            padding: 3px;
+            margin-left: 20px;
+        }}
+
+        .mode-btn {{
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s;
+        }}
+
+        .mode-btn:hover {{
+            color: #333;
+        }}
+
+        .mode-btn.active {{
+            background: #667eea;
+            color: white;
+            box-shadow: 0 2px 4px rgba(102,126,234,0.3);
+        }}
+
+        .mode-badge {{
+            display: inline-block;
+            background: #ff8b00;
+            color: white;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 4px;
+            vertical-align: middle;
+        }}
+
+        /* Sizing method badges */
+        .sizing-badge {{
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
+            margin-left: 4px;
+            vertical-align: middle;
+        }}
+
+        .sizing-badge-jira {{
+            background: #e3fcef;
+            color: #006644;
+        }}
+
+        .sizing-badge-ai {{
+            background: #deebff;
+            color: #0747a6;
+        }}
+
+        .sizing-badge-kw {{
+            background: #fff3cd;
+            color: #856404;
+        }}
+
+        /* Complexity score display */
+        .complexity-score {{
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 4px;
+        }}
+
+        .complexity-low {{ background: #e3fcef; color: #006644; }}
+        .complexity-medium {{ background: #fff3cd; color: #856404; }}
+        .complexity-high {{ background: #fff5f5; color: #de350b; }}
+
+        /* Split indicator */
+        .split-indicator {{
+            display: inline-block;
+            background: #e7f3ff;
+            color: #0052cc;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 4px;
+        }}
+
+        /* Over-capacity dimming */
+        .feature-dimmed {{
+            opacity: 0.35;
+            filter: grayscale(50%);
+            transition: opacity 0.3s, filter 0.3s;
+        }}
+
+        .event-over-capacity {{
+            border-left-color: #dc3545 !important;
+            background: #fff5f5 !important;
+        }}
     </style>
 </head>
 <body>
@@ -1343,15 +1537,40 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
     <!-- DRAFT PLANS TAB -->
     <div id="drafts-tab" class="tab-content">
         <div style="max-width: 1400px; margin: 0 auto;">
-            <div class="alert alert-info">
-                <strong>📝 AI-Recommended 2-Year Release Plan</strong>
-                <span class="info-icon" onclick="showInfo('draft-plan')">ℹ️</span>
-                <p style="margin-top: 10px; font-size: 14px;">
-                    This plan was generated by the auto-scheduler based on:
-                    <br>• Priority ranking from JIRA Plan
-                    <br>• Feature story points
-                    <br>• Capacity guidelines (target 50 pts/event, max 80 pts/event)
-                </p>
+            <div class="alert alert-info" style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <strong>📝 AI-Recommended 2-Year Release Plan</strong>
+                    <span class="info-icon" onclick="showInfo('draft-plan')">ℹ️</span>
+                    <p style="margin-top: 10px; font-size: 14px;">
+                        Auto-scheduled by priority ranking, story points, and capacity limits.
+                    </p>
+                </div>
+                <div class="plan-mode-selector">
+                    <button class="mode-btn active" id="mode-btn-baseline" onclick="setPlanMode('baseline')">Baseline</button>
+                    <button class="mode-btn" id="mode-btn-optimized" onclick="setPlanMode('optimized')">
+                        Optimized (XL Split)
+                        <span class="mode-badge" id="split-count-badge"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Capacity slider -->
+            <div class="capacity-slider-container">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <strong style="font-size: 14px;">Capacity Limit per Event</strong>
+                    <span id="capacity-value" style="font-size: 18px; font-weight: 700; color: #667eea;">80 pts</span>
+                    <span id="capacity-risk" style="font-size: 13px; font-weight: 500; padding: 3px 10px; border-radius: 4px; background: #fff3cd; color: #856404;">Aggressive</span>
+                </div>
+                <input type="range" class="capacity-slider" id="capacity-slider" min="30" max="140" value="80" step="5"
+                    oninput="updateCapacitySlider(this.value)">
+                <div style="position: relative; height: 10px; margin: 0 6px; border-radius: 5px; background: linear-gradient(to right, #28a745 0%, #28a745 0.9%, #ffc107 0.9%, #ffc107 18.2%, #ff8b00 18.2%, #ff8b00 45.5%, #dc3545 45.5%, #dc3545 100%);">
+                </div>
+                <div class="slider-labels" style="position: relative; margin-top: 8px;">
+                    <span style="position: absolute; left: 0%; background: #e3fcef; color: #006644;">≤30 Conservative</span>
+                    <span style="position: absolute; left: 18.2%; transform: translateX(-50%); background: #fff3cd; color: #856404;">31-50 Typical</span>
+                    <span style="position: absolute; left: 45.5%; transform: translateX(-50%); background: #fff0e6; color: #c45100;">51-80 Aggressive</span>
+                    <span style="position: absolute; right: 0%; background: #fff5f5; color: #de350b;">81-140 Maximum</span>
+                </div>
             </div>
 
             <div id="draft-plan-display">
@@ -1368,46 +1587,29 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 <span class="info-icon" onclick="showInfo('analysis')">ℹ️</span>
                 <p style="margin-top: 10px; font-size: 14px;">
                     Comprehensive analysis of your feature backlog for optimal delivery:
-                    <br>• DP/TP/GA phasing recommendations
                     <br>• Feature sizing distribution and optimization
-                    <br>• Delivery efficiency scoring
-                    <br>• Optimized release plan based on best practices
+                    <br>• Delivery efficiency scoring and recommendations
+                    <br>• XL feature splits are auto-applied in the Draft Plans tab (Optimized mode)
                 </p>
             </div>
 
             <!-- Navigation within Analysis tab -->
             <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <button onclick="showAnalysisSection('phasing')" class="analysis-nav-btn active" id="btn-phasing">
-                    📋 Phasing Analysis
-                </button>
-                <button onclick="showAnalysisSection('sizing')" class="analysis-nav-btn" id="btn-sizing">
+                <button onclick="showAnalysisSection('sizing')" class="analysis-nav-btn active" id="btn-sizing">
                     📏 Sizing Analysis
                 </button>
                 <button onclick="showAnalysisSection('recommendations')" class="analysis-nav-btn" id="btn-recommendations">
                     💡 Recommendations
                 </button>
-                <button onclick="showAnalysisSection('optimized')" class="analysis-nav-btn" id="btn-optimized">
-                    🎯 Optimized Draft Plans
-                </button>
             </div>
 
-            <!-- Section 1: Phasing Analysis -->
-            <div id="analysis-phasing" class="analysis-section">
+            <!-- Section 1: Sizing Analysis -->
+            <div id="analysis-sizing" class="analysis-section">
                 <!-- Populated by JavaScript -->
             </div>
 
-            <!-- Section 2: Sizing Analysis -->
-            <div id="analysis-sizing" class="analysis-section" style="display:none;">
-                <!-- Populated by JavaScript -->
-            </div>
-
-            <!-- Section 3: Recommendations -->
+            <!-- Section 2: Recommendations -->
             <div id="analysis-recommendations" class="analysis-section" style="display:none;">
-                <!-- Populated by JavaScript -->
-            </div>
-
-            <!-- Section 4: Optimized Plan -->
-            <div id="analysis-optimized" class="analysis-section" style="display:none;">
                 <!-- Populated by JavaScript -->
             </div>
         </div>
@@ -1419,24 +1621,25 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
         const allReleases = """ + json.dumps(releases, indent=2) + """;
         const releaseMetrics = """ + json.dumps(release_metrics, indent=2) + """;
         const capacity = """ + json.dumps(capacity, indent=2) + """;
-        const recommendedPlan = """ + json.dumps(recommended_plan_js, indent=2) + """;
-
         // Backlog analysis data
         const backlogAnalysis = """ + json.dumps(backlog_analysis if backlog_analysis else {}, indent=2) + """;
 
         // Full feature lookup for getting names and details
-        const allFeatures = """ + json.dumps({f["key"]: {"summary": f["summary"], "points": f["points"]} for f in features}, indent=2) + """;
+        const allFeatures = """ + json.dumps({f["key"]: {
+            "summary": f["summary"],
+            "points": f["points"],
+            "product": f.get("product", "RHOAI"),
+            "issue_type": f.get("issue_type", "Feature"),
+            "status": f.get("status", ""),
+            "priority": f.get("priority", "Normal"),
+            "auto_sized": f.get("auto_sized", False),
+            "sizing_method": f.get("sizing_method", "jira_provided"),
+            "complexity_score": f.get("complexity_score"),
+            "sizing_confidence": f.get("sizing_confidence"),
+        } for f in features}, indent=2) + """;
 
-        // Optimized plan data with full feature info
-        const optimizedPlanData = """ + json.dumps(
-            {
-                "plan": {k: {
-                    "features": [{"key": f["key"], "summary": f["summary"], "points": f["points"]} for f in v["features"]],
-                    "points": v["points"],
-                    "capacity_status": v["capacity_status"]
-                } for k, v in optimized_plan["plan"].items()} if optimized_plan else {},
-                "split_count": optimized_plan["split_count"] if optimized_plan else 0
-            }, indent=2) + """;
+        // Unified plan data: baseline + optimized
+        const planData = """ + json.dumps(build_plan_data(recommended_plan, optimized_plan), indent=2) + """;
 
         // Feature lookup for quick access
         const featureElements = {};
@@ -1613,9 +1816,9 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         <h4>Story Points per Event</h4>
                         <ul>
                             <li>🟢 <strong>Conservative:</strong> ≤30 pts - Low risk</li>
-                            <li>🟡 <strong>Typical:</strong> 30-50 pts - Normal capacity</li>
-                            <li>🟠 <strong>Aggressive:</strong> 50-80 pts - High load, needs mitigations</li>
-                            <li>🔴 <strong>Over Capacity:</strong> >80 pts - Extremely risky</li>
+                            <li>🟡 <strong>Typical:</strong> 31-50 pts - Normal capacity</li>
+                            <li>🟠 <strong>Aggressive:</strong> 51-80 pts - High load, needs mitigations</li>
+                            <li>🔴 <strong>Maximum:</strong> 81-140 pts - Historical ceiling (90% CI)</li>
                         </ul>
                         <p><strong>Historical baseline:</strong> Median 27.5 pts/event, Max 140 pts per entire release</p>
                     </div>
@@ -1628,23 +1831,39 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         <ul>
                             <li><strong>Priority First:</strong> Features ranked in JIRA Plan are scheduled before others</li>
                             <li><strong>Capacity Aware:</strong> Targets ~50 pts per event (typical capacity)</li>
-                            <li><strong>Hard Limits:</strong> Will not exceed 80 pts per event (aggressive max)</li>
+                            <li><strong>Hard Limits:</strong> Up to 140 pts per event (historical max within 90% CI)</li>
                             <li><strong>Sequential Fill:</strong> Fills 3.5 EA1 → EA2 → GA → 3.6 EA1 → etc.</li>
+                        </ul>
+                    </div>
+                    <div class="info-card">
+                        <h4>Plan Modes</h4>
+                        <ul>
+                            <li><strong>Baseline:</strong> Original features, no splitting</li>
+                            <li><strong>Optimized (XL Split):</strong> XL features (13+ pts) split into Part 1 (8 pts) + Part 2 (5 pts)</li>
+                        </ul>
+                    </div>
+                    <div class="info-card">
+                        <h4>Capacity Slider</h4>
+                        <p>Adjust the per-event capacity limit to explore risk tolerance:</p>
+                        <ul>
+                            <li>🟢 ≤30 pts: Conservative</li>
+                            <li>🟡 31-50 pts: Typical</li>
+                            <li>🟠 51-80 pts: Aggressive</li>
+                            <li>🔴 81-140 pts: Maximum (historical limit)</li>
+                        </ul>
+                        <p>Features exceeding the selected limit are dimmed in the plan view.</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Sizing Badges</h4>
+                        <ul>
+                            <li><strong style="color:#006644;">●</strong> JIRA-provided sizing</li>
+                            <li><strong style="color:#0747a6;">AI</strong> Complexity scoring (auto-sized)</li>
+                            <li><strong style="color:#856404;">KW</strong> Keyword heuristic (auto-sized)</li>
                         </ul>
                     </div>
                 `,
                 'analysis': `
                     <h3>About Feature Analysis</h3>
-                    <div class="info-card">
-                        <h4>Phasing Analysis (DP/TP/GA)</h4>
-                        <p>Evaluates which features are large or complex enough to benefit from phased delivery:</p>
-                        <ul>
-                            <li><strong>Dev Preview (DP):</strong> Early release for initial customer feedback</li>
-                            <li><strong>Tech Preview (TP):</strong> Refinement based on feedback</li>
-                            <li><strong>General Availability (GA):</strong> Production-ready release</li>
-                        </ul>
-                        <p>Features with 8+ story points and appropriate complexity are candidates for phasing.</p>
-                    </div>
                     <div class="info-card">
                         <h4>Sizing Distribution Analysis</h4>
                         <p>Shows breakdown of features by size (XS/S/M/L/XL) and compares to ideal distribution:</p>
@@ -1664,15 +1883,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                             <li>How current distribution compares to ideal targets</li>
                             <li>Expected benefits of optimization (faster delivery, better planning)</li>
                         </ul>
-                    </div>
-                    <div class="info-card">
-                        <h4>Optimized Plan</h4>
-                        <p>Shows 2-year plan with recommended optimizations applied:</p>
-                        <ul>
-                            <li>Large features automatically split into smaller parts</li>
-                            <li>Capacity limits strictly enforced</li>
-                            <li>Compare to original plan to see potential improvements</li>
-                        </ul>
+                        <p>XL splits are auto-applied in the Draft Plans tab under Optimized mode.</p>
                     </div>
                 `
             };
@@ -1683,31 +1894,97 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
             }
         }
 
+        // Current plan mode and capacity limit
+        let currentPlanMode = 'baseline';
+        let currentCapacityLimit = 80;
+
+        // Set plan mode (baseline or optimized)
+        function setPlanMode(mode) {
+            currentPlanMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('mode-btn-' + mode).classList.add('active');
+            renderDraftPlan();
+        }
+
+        // Update capacity slider display and re-render
+        function updateCapacitySlider(value) {
+            currentCapacityLimit = parseInt(value);
+            const valEl = document.getElementById('capacity-value');
+            const riskEl = document.getElementById('capacity-risk');
+            const slider = document.getElementById('capacity-slider');
+
+            valEl.textContent = value + ' pts';
+
+            let label, bgColor, textColor, sliderBg;
+            if (value <= 30) {
+                label = 'Conservative'; bgColor = '#e3fcef'; textColor = '#006644'; sliderBg = '#28a745';
+            } else if (value <= 50) {
+                label = 'Typical'; bgColor = '#fff3cd'; textColor = '#856404'; sliderBg = '#ffc107';
+            } else if (value <= 80) {
+                label = 'Aggressive'; bgColor = '#fff0e6'; textColor = '#c45100'; sliderBg = '#ff8b00';
+            } else {
+                label = 'Maximum'; bgColor = '#fff5f5'; textColor = '#de350b'; sliderBg = '#dc3545';
+            }
+            riskEl.textContent = label;
+            riskEl.style.background = bgColor;
+            riskEl.style.color = textColor;
+            slider.style.background = `linear-gradient(to right, ${sliderBg} 0%, ${sliderBg} ${(value - 30) / 110 * 100}%, #e0e0e0 ${(value - 30) / 110 * 100}%, #e0e0e0 100%)`;
+
+            renderDraftPlan();
+        }
+
+        // Get sizing method badge HTML
+        function getSizingBadge(feature) {
+            if (!feature) return '';
+            const method = feature.sizing_method || 'jira_provided';
+            if (method === 'complexity_scoring') return '<span class="sizing-badge sizing-badge-ai">AI</span>';
+            if (method === 'keyword_heuristic') return '<span class="sizing-badge sizing-badge-kw">KW</span>';
+            return '<span class="sizing-badge sizing-badge-jira">●</span>';
+        }
+
+        // Get complexity score HTML
+        function getComplexityBadge(feature) {
+            if (!feature || feature.complexity_score == null) return '';
+            const score = feature.complexity_score;
+            const cls = score <= 4 ? 'complexity-low' : score <= 8 ? 'complexity-medium' : 'complexity-high';
+            return `<span class="complexity-score ${cls}">${score}</span>`;
+        }
+
+        // Get confidence label HTML
+        function getConfidenceBadge(feature) {
+            if (!feature || !feature.sizing_confidence) return '';
+            return `<span style="font-size:9px;color:#999;margin-left:3px;">${feature.sizing_confidence}</span>`;
+        }
+
         // Render draft plan
         function renderDraftPlan() {
             const container = document.getElementById('draft-plan-display');
+            const activePlan = planData[currentPlanMode] || {};
 
-            if (!recommendedPlan || Object.keys(recommendedPlan).length === 0) {
+            // Update split count badge
+            const badge = document.getElementById('split-count-badge');
+            if (planData.metadata && planData.metadata.splits_applied > 0) {
+                badge.textContent = planData.metadata.splits_applied + ' splits';
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+
+            if (!activePlan || Object.keys(activePlan).length === 0) {
                 container.innerHTML = `
                     <div class="alert alert-warning">
                         <strong>⚠️ No draft plan available</strong>
-                        <p>The auto-scheduler was unable to generate a recommended plan. This may be because:</p>
-                        <ul>
-                            <li>No unscheduled features with story points were found</li>
-                            <li>The auto-scheduler module is not available</li>
-                        </ul>
+                        <p>The auto-scheduler was unable to generate a recommended plan for this mode.</p>
                     </div>
                 `;
                 return;
             }
 
-            // Group by release version
             const quarters = {
                 "3.5": "Q2 2026", "3.6": "Q3 2026", "3.7": "Q4 2026", "3.8": "Q1 2027",
                 "3.9": "Q2 2027", "3.10": "Q3 2027", "3.11": "Q4 2027", "3.12": "Q1 2028"
             };
 
-            // Release goals based on key themes
             const releaseGoals = {
                 "3.5": "Focus on distributed inference improvements, model serving enhancements, and evaluation capabilities.",
                 "3.6": "Advance observability and showback features, API parity improvements, and agent metadata support.",
@@ -1719,31 +1996,27 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 "3.12": "Refine IDE integration, Feature Store RBAC, and lifecycle documentation for enterprise readiness."
             };
 
+            // Group buckets by release
             const releases = {};
-            for (const bucketKey in recommendedPlan) {
-                const [version, event] = bucketKey.split('-');
+            for (const bucketKey in activePlan) {
+                const parts = bucketKey.split('-');
+                const version = parts[0];
+                const event = parts[1];
                 if (!releases[version]) {
                     releases[version] = { EA1: null, EA2: null, GA: null };
                 }
-                releases[version][event] = recommendedPlan[bucketKey];
+                releases[version][event] = activePlan[bucketKey];
             }
 
             let html = '';
-
-            // Render each release (only 3.4 and after)
             const sortedVersions = Object.keys(releases)
                 .filter(v => parseFloat(v) >= 3.4)
-                .sort((a, b) => {
-                    const aNum = parseFloat(a);
-                    const bNum = parseFloat(b);
-                    return aNum - bNum;
-                });
+                .sort((a, b) => parseFloat(a) - parseFloat(b));
 
             for (const version of sortedVersions) {
                 const releaseData = releases[version];
                 const quarter = quarters[version] || '';
 
-                // Calculate release totals
                 let releaseTotalFeatures = 0;
                 let releaseTotalPoints = 0;
                 for (const event in releaseData) {
@@ -1771,56 +2044,58 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
                 `;
 
-                // Render each event
                 for (const event of ['EA1', 'EA2', 'GA']) {
                     const eventData = releaseData[event];
 
                     if (eventData && eventData.features.length > 0) {
-                        const statusIcon = {
-                            'conservative': '🟢',
-                            'typical': '🟡',
-                            'aggressive': '🟠',
-                            'over_capacity': '🔴'
-                        }[eventData.capacity_status] || '⚪';
+                        const overCapacity = eventData.points > currentCapacityLimit;
 
-                        const statusColor = {
-                            'conservative': '#28a745',
-                            'typical': '#90ee90',
-                            'aggressive': '#ffc107',
-                            'over_capacity': '#dc3545'
-                        }[eventData.capacity_status] || '#ccc';
+                        const statusIcons = {
+                            'conservative': '🟢', 'typical': '🟡', 'aggressive': '🟠',
+                            'maximum': '🔴', 'over_capacity': '🔴'
+                        };
+                        const statusColors = {
+                            'conservative': '#28a745', 'typical': '#90ee90', 'aggressive': '#ffc107',
+                            'maximum': '#dc3545', 'over_capacity': '#dc3545'
+                        };
+
+                        let displayStatus = eventData.capacity_status;
+                        let statusColor = statusColors[displayStatus] || '#ccc';
+                        let statusIcon = statusIcons[displayStatus] || '⚪';
+
+                        // Override display if over the slider capacity limit
+                        if (overCapacity) {
+                            statusColor = '#dc3545';
+                            statusIcon = '🔴';
+                        }
+
+                        const eventClass = overCapacity ? 'event-over-capacity' : '';
 
                         html += `
-                            <div style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid ${statusColor};">
+                            <div class="${eventClass}" style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid ${statusColor};">
                                 <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #333;">
                                     ${event} ${statusIcon}
+                                    ${overCapacity ? '<span style="font-size:11px;color:#dc3545;font-weight:normal;"> Over limit</span>' : ''}
                                 </h3>
                                 <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">
                                     <strong>${eventData.features.length} features, ${eventData.points} pts</strong>
                                     <br>
-                                    <em style="font-size: 12px;">${eventData.capacity_status.replace('_', ' ')}</em>
+                                    <em style="font-size: 12px;">${displayStatus.replace('_', ' ')}</em>
                                 </p>
                         `;
 
-                        // Calculate size distribution for this event
+                        // Size distribution
                         const sizeDistribution = { XL: 0, L: 0, M: 0, S: 0, XS: 0 };
-                        eventData.features.forEach(key => {
-                            const feature = allFeatures[key];
-                            if (feature) {
-                                const pts = feature.points;
-                                if (pts >= 13) sizeDistribution.XL++;
-                                else if (pts >= 8) sizeDistribution.L++;
-                                else if (pts >= 5) sizeDistribution.M++;
-                                else if (pts >= 3) sizeDistribution.S++;
-                                else sizeDistribution.XS++;
-                            }
+                        eventData.features.forEach(f => {
+                            const pts = typeof f === 'object' ? f.points : (allFeatures[f] ? allFeatures[f].points : 0);
+                            if (pts >= 13) sizeDistribution.XL++;
+                            else if (pts >= 8) sizeDistribution.L++;
+                            else if (pts >= 5) sizeDistribution.M++;
+                            else if (pts >= 3) sizeDistribution.S++;
+                            else sizeDistribution.XS++;
                         });
 
-                        // Show size summary
-                        html += `
-                                <div style="background: white; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 11px;">
-                                    <strong>Sizes:</strong>
-                        `;
+                        html += `<div style="background: white; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 11px;"><strong>Sizes:</strong>`;
                         ['XL', 'L', 'M', 'S', 'XS'].forEach(size => {
                             if (sizeDistribution[size] > 0) {
                                 html += ` <span style="background: #e0e0e0; padding: 2px 5px; border-radius: 2px; margin: 0 2px;">${size}:${sizeDistribution[size]}</span>`;
@@ -1828,58 +2103,88 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         });
                         html += `</div>`;
 
-                        // Show feature list with names and sizes
+                        // Feature list - handle both object and string-key formats
                         html += `<div style="max-height: 200px; overflow-y: auto;">`;
-                        eventData.features.forEach(key => {
-                            const feature = allFeatures[key];
-                            if (feature) {
-                                const pts = feature.points;
-                                const size = pts >= 13 ? 'XL' : pts >= 8 ? 'L' : pts >= 5 ? 'M' : pts >= 3 ? 'S' : 'XS';
-                                html += `
-                                    <div style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 11px;">
-                                        <div style="font-weight: 600; color: #0052cc; margin-bottom: 2px;">
-                                            ${key}
-                                            <span style="background: #667eea; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; margin-left: 4px;">${pts}pts ${size}</span>
-                                        </div>
-                                        <div style="color: #666; font-size: 10px;">${feature.summary.substring(0, 80)}${feature.summary.length > 80 ? '...' : ''}</div>
-                                    </div>
-                                `;
-                            } else {
-                                html += `<div style="padding: 3px 0; color: #0052cc;">• ${key}</div>`;
-                            }
-                        });
-                        html += `</div>`;
 
-                        html += `
-                            </div>
-                        `;
+                        // Track cumulative points for dimming
+                        let cumulativePoints = 0;
+                        eventData.features.forEach(f => {
+                            let key, pts, isSplit = false, splitFrom = null, splitPart = null;
+
+                            if (typeof f === 'object') {
+                                key = f.key;
+                                pts = f.points;
+                                isSplit = f.split || false;
+                                splitFrom = f.split_from || null;
+                                splitPart = f.split_part || null;
+                            } else {
+                                key = f;
+                                const feat = allFeatures[key];
+                                pts = feat ? feat.points : 0;
+                            }
+
+                            cumulativePoints += pts;
+                            const dimmed = cumulativePoints > currentCapacityLimit;
+                            const dimClass = dimmed ? 'feature-dimmed' : '';
+
+                            // Look up feature details (use split_from for split features)
+                            const lookupKey = splitFrom || key;
+                            const feature = allFeatures[lookupKey] || allFeatures[key];
+                            const size = pts >= 13 ? 'XL' : pts >= 8 ? 'L' : pts >= 5 ? 'M' : pts >= 3 ? 'S' : 'XS';
+
+                            html += `<div class="${dimClass}" style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 11px;">`;
+                            html += `<div style="font-weight: 600; color: #0052cc; margin-bottom: 2px;">`;
+                            html += `${key}`;
+                            html += ` <span style="background: #667eea; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; margin-left: 4px;">${pts}pts ${size}</span>`;
+
+                            // Sizing method badge
+                            if (feature) html += getSizingBadge(feature);
+
+                            // Complexity score (for auto-sized features)
+                            if (feature) html += getComplexityBadge(feature);
+
+                            // Confidence label
+                            if (feature) html += getConfidenceBadge(feature);
+
+                            // Split indicator
+                            if (isSplit && splitPart) {
+                                html += `<span class="split-indicator">Part ${splitPart}/2</span>`;
+                            }
+
+                            html += `</div>`;
+                            if (feature) {
+                                const summary = feature.summary || '';
+                                html += `<div style="color: #666; font-size: 10px;">${summary.substring(0, 80)}${summary.length > 80 ? '...' : ''}</div>`;
+                            }
+                            html += `</div>`;
+                        });
+                        html += `</div></div>`;
                     } else {
-                        // Empty event
                         html += `
                             <div style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid #ccc;">
-                                <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #999;">
-                                    ${event}
-                                </h3>
-                                <p style="margin: 0; font-size: 14px; color: #999;">
-                                    <em>No features scheduled</em>
-                                </p>
+                                <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #999;">${event}</h3>
+                                <p style="margin: 0; font-size: 14px; color: #999;"><em>No features scheduled</em></p>
                             </div>
                         `;
                     }
                 }
 
-                html += `
-                        </div>
-                    </div>
-                `;
+                html += `</div></div>`;
             }
 
             container.innerHTML = html;
         }
 
-        // Initialize draft plan on load
+        // Initialize on load
         document.addEventListener('DOMContentLoaded', function() {
-            renderDraftPlan();
+            // Set default plan mode to optimized if splits available
+            if (planData.metadata && planData.metadata.splits_applied > 0) {
+                setPlanMode('optimized');
+            } else {
+                renderDraftPlan();
+            }
+            // Initialize slider visual
+            updateCapacitySlider(80);
             renderAnalysis();
         });
 
@@ -1897,84 +2202,12 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
         // Render all analysis sections
         function renderAnalysis() {
             if (!backlogAnalysis || !backlogAnalysis.insights) {
-                document.getElementById('analysis-phasing').innerHTML = '<p>No analysis data available</p>';
+                document.getElementById('analysis-sizing').innerHTML = '<p>No analysis data available</p>';
                 return;
             }
 
-            renderPhasingAnalysis();
             renderSizingAnalysis();
             renderRecommendations();
-            renderOptimizedPlan();
-        }
-
-        // Render Phasing Analysis section
-        function renderPhasingAnalysis() {
-            const container = document.getElementById('analysis-phasing');
-            const phasing = backlogAnalysis.insights.phasing;
-
-            let html = `
-                <h2 style="margin: 0 0 20px 0; color: #333;">DP/TP/GA Phasing Analysis</h2>
-
-                <div style="margin: 20px 0;">
-                    <div class="metric-box" style="background: #e7f3ff;">
-                        <div class="metric-box-value" style="color: #0052cc;">${phasing.total}</div>
-                        <div class="metric-box-label">Total Features</div>
-                    </div>
-                    <div class="metric-box" style="background: #f0fff4;">
-                        <div class="metric-box-value" style="color: #28a745;">${phasing.phaseable}</div>
-                        <div class="metric-box-label">Phaseable Features</div>
-                    </div>
-                    <div class="metric-box" style="background: #fff8e6;">
-                        <div class="metric-box-value" style="color: #ff8b00;">${phasing.percentage}%</div>
-                        <div class="metric-box-label">Phasing Potential</div>
-                    </div>
-                </div>
-
-                <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="margin: 0 0 15px 0; color: #555; font-size: 16px;">What This Means</h3>
-                    <p style="margin: 0; line-height: 1.6; color: #666;">
-                        <strong>${phasing.phaseable}</strong> features (${phasing.percentage}%) are large or complex enough to benefit from phased delivery across DP → TP → GA.
-                        This allows for:
-                        <br>• Earlier customer feedback with Dev Preview (DP)
-                        <br>• Iterative refinement in Tech Preview (TP)
-                        <br>• Production-ready release in General Availability (GA)
-                    </p>
-                </div>
-
-                <h3 style="margin: 20px 0 15px 0; color: #333;">Feature-Level Phasing Recommendations</h3>
-                <div style="max-height: 400px; overflow-y: auto;">
-            `;
-
-            // Show sample of phaseable features
-            const phaseableFeatures = backlogAnalysis.phasing_results
-                .filter(r => r.analysis.phaseable)
-                .slice(0, 20);  // Show first 20
-
-            phaseableFeatures.forEach(result => {
-                const f = result.feature;
-                const analysis = result.analysis;
-
-                html += `
-                    <div style="padding: 15px; margin: 10px 0; border-left: 4px solid #667eea; background: #f9f9f9; border-radius: 4px;">
-                        <div style="font-weight: 600; color: #333; margin-bottom: 5px;">
-                            ${f.key} <span style="background: #667eea; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 5px;">${f.points} pts</span>
-                        </div>
-                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">${f.summary}</div>
-                        <div style="font-size: 12px; color: #555; background: white; padding: 8px; border-radius: 3px;">
-                            <strong>💡 Recommendation:</strong> ${analysis.recommendation}
-                        </div>
-                    </div>
-                `;
-            });
-
-            if (phaseableFeatures.length < backlogAnalysis.phasing_results.filter(r => r.analysis.phaseable).length) {
-                const remaining = backlogAnalysis.phasing_results.filter(r => r.analysis.phaseable).length - phaseableFeatures.length;
-                html += `<p style="margin: 15px 0; color: #666; font-style: italic;">...and ${remaining} more phaseable features</p>`;
-            }
-
-            html += `</div>`;
-
-            container.innerHTML = html;
         }
 
         // Render Sizing Analysis section
@@ -2167,177 +2400,13 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                         <li>More frequent customer feedback</li>
                     </ul>
                 </div>
-            `;
 
-            container.innerHTML = html;
-        }
-
-        // Render Optimized Plan section
-        function renderOptimizedPlan() {
-            const container = document.getElementById('analysis-optimized');
-
-            let html = `
-                <h2 style="margin: 0 0 20px 0; color: #333;">Optimized Draft Release Plans</h2>
-
-                <div class="alert alert-info" style="margin-bottom: 20px;">
-                    <strong>🎯 Optimization Applied</strong>
-                    <p style="margin: 10px 0 0 0;">
-                        This plan applies the sizing recommendations above:
-                        <br>• Large features (XL) split into smaller deliverables
-                        <br>• ${optimizedPlanData.split_count} features optimized for faster delivery
-                        <br>• Capacity limits strictly enforced (80 pts/event max)
-                        <br>• Features prioritized by target end date
-                    </p>
-                </div>
-            `;
-
-            if (!optimizedPlanData.plan || Object.keys(optimizedPlanData.plan).length === 0) {
-                html += '<p>No optimized plan available</p>';
-                container.innerHTML = html;
-                return;
-            }
-
-            // Group by release
-            const quarters = {
-                "3.5": "Q2 2026", "3.6": "Q3 2026", "3.7": "Q4 2026", "3.8": "Q1 2027",
-                "3.9": "Q2 2027", "3.10": "Q3 2027", "3.11": "Q4 2027", "3.12": "Q1 2028"
-            };
-
-            const releases = {};
-            for (const bucketKey in optimizedPlanData.plan) {
-                const [version, event] = bucketKey.split('-');
-                if (!releases[version]) {
-                    releases[version] = { EA1: null, EA2: null, GA: null };
-                }
-                releases[version][event] = optimizedPlanData.plan[bucketKey];
-            }
-
-            const sortedVersions = Object.keys(releases)
-                .filter(v => parseFloat(v) >= 3.4)
-                .sort((a, b) => parseFloat(a) - parseFloat(b));
-
-            for (const version of sortedVersions) {
-                const releaseData = releases[version];
-                const quarter = quarters[version] || '';
-
-                let releaseTotalFeatures = 0;
-                let releaseTotalPoints = 0;
-                for (const event in releaseData) {
-                    if (releaseData[event]) {
-                        releaseTotalFeatures += releaseData[event].features.length;
-                        releaseTotalPoints += releaseData[event].points;
-                    }
-                }
-
-                html += `
-                    <div style="background: white; border-radius: 8px; padding: 25px; margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                        <h3 style="margin: 0 0 15px 0; color: #333; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
-                            RHOAI-${version}
-                            <span style="font-size: 14px; color: #666; font-weight: normal;">(${quarter})</span>
-                            <span style="float: right; font-size: 14px; font-weight: normal; color: #666;">
-                                ${releaseTotalFeatures} features, ${releaseTotalPoints} pts
-                            </span>
-                        </h3>
-                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                `;
-
-                for (const event of ['EA1', 'EA2', 'GA']) {
-                    const eventData = releaseData[event];
-
-                    if (eventData && eventData.features.length > 0) {
-                        const statusColor = {
-                            'conservative': '#28a745',
-                            'typical': '#90ee90',
-                            'aggressive': '#ffc107',
-                            'over_capacity': '#dc3545'
-                        }[eventData.capacity_status] || '#ccc';
-
-                        const statusIcon = {
-                            'conservative': '🟢',
-                            'typical': '🟡',
-                            'aggressive': '🟠',
-                            'over_capacity': '🔴'
-                        }[eventData.capacity_status] || '';
-
-                        html += `
-                            <div style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid ${statusColor};">
-                                <h4 style="margin: 0 0 10px 0; font-size: 16px; color: #333;">
-                                    ${event} ${statusIcon}
-                                </h4>
-                                <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">
-                                    <strong>${eventData.features.length} features, ${eventData.points} pts</strong>
-                                    <br>
-                                    <em style="font-size: 12px;">${eventData.capacity_status.replace('_', ' ')}</em>
-                                </p>
-                        `;
-
-                        // Calculate size distribution for this event
-                        const sizeDistribution = { XL: 0, L: 0, M: 0, S: 0, XS: 0 };
-                        eventData.features.forEach(feature => {
-                            const pts = feature.points;
-                            if (pts >= 13) sizeDistribution.XL++;
-                            else if (pts >= 8) sizeDistribution.L++;
-                            else if (pts >= 5) sizeDistribution.M++;
-                            else if (pts >= 3) sizeDistribution.S++;
-                            else sizeDistribution.XS++;
-                        });
-
-                        // Show size summary
-                        html += `
-                            <div style="background: white; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 11px;">
-                                <strong>Sizes:</strong>
-                        `;
-                        ['XL', 'L', 'M', 'S', 'XS'].forEach(size => {
-                            if (sizeDistribution[size] > 0) {
-                                html += ` <span style="background: #e0e0e0; padding: 2px 5px; border-radius: 2px; margin: 0 2px;">${size}:${sizeDistribution[size]}</span>`;
-                            }
-                        });
-                        html += `</div>`;
-
-                        // Show feature list with names and sizes
-                        html += `<div style="max-height: 200px; overflow-y: auto;">`;
-                        eventData.features.forEach(feature => {
-                            const pts = feature.points;
-                            const size = pts >= 13 ? 'XL' : pts >= 8 ? 'L' : pts >= 5 ? 'M' : pts >= 3 ? 'S' : 'XS';
-                            html += `
-                                <div style="padding: 6px 0; border-bottom: 1px solid #eee; font-size: 11px;">
-                                    <div style="font-weight: 600; color: #0052cc; margin-bottom: 2px;">
-                                        ${feature.key}
-                                        <span style="background: #667eea; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; margin-left: 4px;">${pts}pts ${size}</span>
-                                    </div>
-                                    <div style="color: #666; font-size: 10px;">${feature.summary.substring(0, 80)}${feature.summary.length > 80 ? '...' : ''}</div>
-                                </div>
-                            `;
-                        });
-                        html += `</div>`;
-
-                        html += `</div>`;
-                    } else {
-                        html += `
-                            <div style="background: #f8f9fa; border-radius: 6px; padding: 15px; border-left: 4px solid #ccc;">
-                                <h4 style="margin: 0 0 10px 0; font-size: 16px; color: #999;">
-                                    ${event}
-                                </h4>
-                                <p style="margin: 0; font-size: 14px; color: #999;">
-                                    <em>No features scheduled</em>
-                                </p>
-                            </div>
-                        `;
-                    }
-                }
-
-                html += `</div></div>`;
-            }
-
-            html += `
-                <div style="background: #f0fff4; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
-                    <h4 style="margin: 0 0 10px 0; color: #28a745;">Comparison: Original vs Optimized</h4>
+                <div style="background: #e7f3ff; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #0052cc;">
+                    <h4 style="margin: 0 0 10px 0; color: #0052cc;">See Splits in Action</h4>
                     <p style="margin: 0; color: #555; line-height: 1.6;">
-                        <strong>Original Plan:</strong> May have had over-capacity events or large features blocking delivery
-                        <br>
-                        <strong>Optimized Plan:</strong> All events within capacity, features right-sized for efficient delivery
-                        <br><br>
-                        <em>Note: The optimized plan is a recommendation. Review and adjust based on business priorities and dependencies.</em>
+                        XL feature splits are automatically applied in the <strong>Draft Plans</strong> tab.
+                        Switch to <strong>Optimized (XL Split)</strong> mode to see how split features distribute across release events.
+                        Use the <strong>capacity slider</strong> to explore different risk tolerance levels (30-140 pts).
                     </p>
                 </div>
             `;
@@ -2378,10 +2447,11 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 <h4>📝 Draft Release Plans</h4>
                 <p>View AI-recommended 2-year release plan (3.5-3.12)</p>
                 <ul>
-                    <li><strong>Auto-Generated:</strong> Features distributed by priority & target dates</li>
-                    <li><strong>Capacity-Aware:</strong> Respects 80 pts/event maximum</li>
+                    <li><strong>Plan Modes:</strong> Toggle between Baseline and Optimized (XL Split)</li>
+                    <li><strong>Capacity Slider:</strong> Adjust per-event limit from 30 to 140 pts</li>
+                    <li><strong>Sizing Badges:</strong> See how each feature was sized (JIRA / AI / Keyword)</li>
+                    <li><strong>Split Indicators:</strong> Optimized mode shows Part 1/2 for XL splits</li>
                     <li><strong>Release Goals:</strong> Each release shows strategic objectives</li>
-                    <li><strong>Detailed View:</strong> Shows feature names, sizes, and summaries for each event</li>
                 </ul>
             </div>
 
@@ -2389,10 +2459,8 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 <h4>🔬 Feature Analysis</h4>
                 <p>Comprehensive backlog analysis and optimization</p>
                 <ul>
-                    <li><strong>Phasing Analysis:</strong> Which features can be split across DP/TP/GA</li>
                     <li><strong>Sizing Distribution:</strong> Breakdown of feature sizes with recommendations</li>
                     <li><strong>Recommendations:</strong> Specific suggestions for splitting oversized features</li>
-                    <li><strong>Optimized Plan:</strong> 2-year plan with recommended optimizations applied</li>
                     <li><strong>Efficiency Score:</strong> Measure of delivery efficiency (target: 80+)</li>
                 </ul>
             </div>
@@ -2412,11 +2480,11 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 <h4>📏 Capacity Guidelines</h4>
                 <ul>
                     <li>🟢 Conservative: ≤30 pts</li>
-                    <li>🟡 Typical: 30-50 pts</li>
-                    <li>🟠 Aggressive: 50-80 pts</li>
-                    <li>🔴 Over Capacity: >80 pts</li>
+                    <li>🟡 Typical: 31-50 pts</li>
+                    <li>🟠 Aggressive: 51-80 pts</li>
+                    <li>🔴 Maximum: 81-140 pts (historical max within 90% CI)</li>
                 </ul>
-                <p><strong>Historical baseline:</strong> 27.5 pts/event median</p>
+                <p><strong>Historical baseline:</strong> 27.5 pts/event median, 140 pts historical max release</p>
             </div>
 
             <div class="info-card">
@@ -2560,13 +2628,15 @@ def main():
     print(f"   Phaseable features (DP/TP/GA): {backlog_analysis['insights']['phasing']['phaseable']} ({backlog_analysis['insights']['phasing']['percentage']}%)")
     print(f"   Delivery efficiency score: {backlog_analysis['insights']['efficiency_score']}/100")
 
-    # Generate optimized plan
+    # Generate optimized plan (using enhanced scheduler with XL splitting)
     print()
     print("🤖 Generating optimized release plan...")
-    optimized_plan_result = generate_optimized_plan(unscheduled, CAPACITY, backlog_analysis['sizing_analysis'])
+    optimized_plan_result = auto_schedule_features_enhanced(
+        unscheduled, CAPACITY, start_version="3.5", num_releases=8, enable_splitting=True
+    )
 
-    if optimized_plan_result['split_count'] > 0:
-        print(f"   Split {optimized_plan_result['split_count']} large features into smaller deliverables")
+    if optimized_plan_result['splits_applied'] > 0:
+        print(f"   Split {optimized_plan_result['splits_applied']} large features into smaller deliverables")
 
     # Generate HTML
     print()

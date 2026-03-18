@@ -44,6 +44,7 @@ PLAN_VIEW = "Outcomes & Features (Jeff's View)"
 FIELD_STORY_POINTS = "customfield_10836"
 FIELD_TARGET_VERSION = "customfield_10855"
 FIELD_TARGET_END_DATE = "customfield_10015"  # Target end date for planning
+FIELD_RELEASE_TYPE = "customfield_10851"  # Release Type (GA, Dev Preview, Tech Preview)
 
 # Capacity guidelines (from PREDICTIVE_RELEASE_CAPACITY_REPORT.md)
 CAPACITY = {
@@ -170,7 +171,7 @@ def get_all_features():
     while True:
         params = {
             "jql": jql,
-            "fields": f"key,summary,status,priority,issuetype,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},labels,issuelinks",
+            "fields": f"key,summary,status,priority,issuetype,{FIELD_STORY_POINTS},fixVersions,{FIELD_TARGET_VERSION},{FIELD_TARGET_END_DATE},{FIELD_RELEASE_TYPE},labels,issuelinks",
             "maxResults": max_results
         }
         if next_page_token:
@@ -284,6 +285,10 @@ def parse_features(issues, ranking):
             scheduled_to = None
             status_category = "unscheduled"
 
+        # Get release type (GA, Dev Preview, Tech Preview)
+        release_type_field = fields.get(FIELD_RELEASE_TYPE)
+        release_type = release_type_field.get("value") if isinstance(release_type_field, dict) else None
+
         # Get labels
         labels = fields.get("labels", [])
 
@@ -325,6 +330,7 @@ def parse_features(issues, ranking):
             "scheduled_to": scheduled_to,
             "status_category": status_category,
             "labels": labels,
+            "release_type": release_type,
             "rank": rank,
             "in_plan": in_plan,
         }
@@ -802,13 +808,14 @@ def build_plan_data(recommended_plan, optimized_plan):
                     "key": f["key"],
                     "points": f["points"],
                     "split": f.get("split", False),
+                    "release_type": f.get("release_type"),
                 }
                 if f.get("split"):
                     entry["split_from"] = f.get("split_from", "")
                     entry["split_part"] = f.get("split_part")
                 features_js.append(entry)
         else:
-            features_js = [{"key": f["key"], "points": f["points"], "split": False} for f in bucket_data["features"]]
+            features_js = [{"key": f["key"], "points": f["points"], "split": False, "release_type": f.get("release_type")} for f in bucket_data["features"]]
         return {
             "features": features_js,
             "points": bucket_data["points"],
@@ -1642,6 +1649,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
             "sizing_method": f.get("sizing_method", "jira_provided"),
             "complexity_score": f.get("complexity_score"),
             "sizing_confidence": f.get("sizing_confidence"),
+            "release_type": f.get("release_type"),
         } for f in features}, indent=2) + """;
 
         // Unified plan data: baseline + optimized
@@ -1863,7 +1871,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                             <li>🟠 51-80 pts: Aggressive</li>
                             <li>🔴 81-140 pts: Maximum (historical limit)</li>
                         </ul>
-                        <p>Features exceeding the selected limit are dimmed in the plan view.</p>
+                        <p>Features are dynamically redistributed across events and releases to respect the selected limit. Overflow features appear in a notice below the plan.</p>
                     </div>
                     <div class="info-card">
                         <h4>Sizing Badges</h4>
@@ -1910,11 +1918,119 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
         let currentPlanMode = 'baseline';
         let currentCapacityLimit = 80;
 
+        // Rebalancing state
+        let orderedFeatures = [];   // flat priority-ordered feature list for current mode
+        let rebalancedPlan = {};    // current rebalanced bucket assignments
+
+        // Extract flat priority-ordered feature list from planData[mode]
+        function getOrderedFeatures(mode) {
+            const plan = planData[mode] || {};
+            const features = [];
+            // Collect all bucket keys and sort by version ascending, then event order
+            const eventOrder = { EA1: 0, EA2: 1, GA: 2 };
+            const bucketKeys = Object.keys(plan).sort((a, b) => {
+                const [verA, evA] = a.split('-');
+                const [verB, evB] = b.split('-');
+                const verCmp = parseFloat(verA) - parseFloat(verB);
+                if (verCmp !== 0) return verCmp;
+                return (eventOrder[evA] || 0) - (eventOrder[evB] || 0);
+            });
+            for (const bk of bucketKeys) {
+                const bucket = plan[bk];
+                if (bucket && bucket.features) {
+                    for (const f of bucket.features) {
+                        // Normalize: ensure we have key, points, release_type
+                        const key = typeof f === 'object' ? f.key : f;
+                        const pts = typeof f === 'object' ? f.points : (allFeatures[key] ? allFeatures[key].points : 0);
+                        const isSplit = typeof f === 'object' ? (f.split || false) : false;
+                        const splitFrom = typeof f === 'object' ? (f.split_from || null) : null;
+                        const splitPart = typeof f === 'object' ? (f.split_part || null) : null;
+                        // Determine release_type: from bucket feature data, then allFeatures lookup
+                        let releaseType = typeof f === 'object' ? f.release_type : null;
+                        if (releaseType == null) {
+                            const lookupKey = splitFrom || key;
+                            const feat = allFeatures[lookupKey] || allFeatures[key];
+                            releaseType = feat ? feat.release_type : null;
+                        }
+                        features.push({ key, points: pts, split: isSplit, split_from: splitFrom, split_part: splitPart, release_type: releaseType });
+                    }
+                }
+            }
+            return features;
+        }
+
+        // Rebalance features into release-event buckets respecting capacity and release-type constraints
+        function rebalance(features, capacityLimit) {
+            // Derive bucket structure from planData (use current mode's keys)
+            const plan = planData[currentPlanMode] || {};
+            const eventOrder = { EA1: 0, EA2: 1, GA: 2 };
+            const bucketKeys = Object.keys(plan).sort((a, b) => {
+                const [verA, evA] = a.split('-');
+                const [verB, evB] = b.split('-');
+                const verCmp = parseFloat(verA) - parseFloat(verB);
+                if (verCmp !== 0) return verCmp;
+                return (eventOrder[evA] || 0) - (eventOrder[evB] || 0);
+            });
+
+            // Initialize empty buckets
+            const result = {};
+            for (const bk of bucketKeys) {
+                result[bk] = { features: [], points: 0, capacity_status: 'conservative' };
+            }
+
+            const overflow = [];
+
+            // For each feature, find the first eligible bucket with room
+            for (const feat of features) {
+                const rt = feat.release_type;
+                // Determine eligible event types
+                let eligibleEvents;
+                if (rt === 'GA') {
+                    eligibleEvents = new Set(['GA']);
+                } else {
+                    // Dev Preview, Tech Preview, null/unset -> any event
+                    eligibleEvents = new Set(['EA1', 'EA2', 'GA']);
+                }
+
+                let placed = false;
+                for (const bk of bucketKeys) {
+                    const eventType = bk.split('-')[1];
+                    if (!eligibleEvents.has(eventType)) continue;
+                    const bucket = result[bk];
+                    // Place if bucket is empty (always accept first feature) or adding wouldn't exceed limit
+                    if (bucket.features.length === 0 || bucket.points + feat.points <= capacityLimit) {
+                        bucket.features.push(feat);
+                        bucket.points += feat.points;
+                        placed = true;
+                        break;
+                    }
+                }
+
+                if (!placed) {
+                    overflow.push(feat);
+                }
+            }
+
+            // Compute capacity_status for each bucket
+            for (const bk of bucketKeys) {
+                const pts = result[bk].points;
+                if (pts <= 30) result[bk].capacity_status = 'conservative';
+                else if (pts <= 50) result[bk].capacity_status = 'typical';
+                else if (pts <= 80) result[bk].capacity_status = 'aggressive';
+                else if (pts <= 140) result[bk].capacity_status = 'maximum';
+                else result[bk].capacity_status = 'over_capacity';
+            }
+
+            return { plan: result, overflow: overflow };
+        }
+
         // Set plan mode (baseline or optimized)
         function setPlanMode(mode) {
             currentPlanMode = mode;
             document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
             document.getElementById('mode-btn-' + mode).classList.add('active');
+            orderedFeatures = getOrderedFeatures(mode);
+            rebalancedPlan = rebalance(orderedFeatures, currentCapacityLimit);
             renderDraftPlan();
         }
 
@@ -1942,6 +2058,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
             riskEl.style.color = textColor;
             slider.style.background = `linear-gradient(to right, ${sliderBg} 0%, ${sliderBg} ${(value - 30) / 110 * 100}%, #e0e0e0 ${(value - 30) / 110 * 100}%, #e0e0e0 100%)`;
 
+            rebalancedPlan = rebalance(orderedFeatures, currentCapacityLimit);
             renderDraftPlan();
         }
 
@@ -1971,7 +2088,7 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
         // Render draft plan
         function renderDraftPlan() {
             const container = document.getElementById('draft-plan-display');
-            const activePlan = planData[currentPlanMode] || {};
+            const activePlan = rebalancedPlan.plan || {};
 
             // Update split count badge
             const badge = document.getElementById('split-count-badge');
@@ -2193,18 +2310,46 @@ def generate_html(features, releases, unscheduled, capacity, recommended_plan=No
                 html += `</div></div>`;
             }
 
+            // Overflow notice
+            if (rebalancedPlan.overflow && rebalancedPlan.overflow.length > 0) {
+                const overflowPts = rebalancedPlan.overflow.reduce((s, f) => s + f.points, 0);
+                html += `
+                    <div style="background: #fff5f5; border-left: 4px solid #dc3545; padding: 15px 20px; border-radius: 4px; margin-top: 15px;">
+                        <strong style="color: #dc3545;">Unscheduled Overflow:</strong>
+                        <span style="color: #555;"> ${rebalancedPlan.overflow.length} features (${overflowPts} pts) could not fit within the ${currentCapacityLimit}-pt per-event limit.</span>
+                        <br><span style="font-size: 12px; color: #888;">Increase the capacity slider or add more release events to accommodate these features.</span>
+                        <div style="margin-top: 10px; max-height: 150px; overflow-y: auto;">
+                `;
+                rebalancedPlan.overflow.forEach(f => {
+                    const lookupKey = f.split_from || f.key;
+                    const feat = allFeatures[lookupKey] || allFeatures[f.key];
+                    const summary = feat ? feat.summary || '' : '';
+                    html += `<div style="padding: 4px 0; border-bottom: 1px solid #f0d0d0; font-size: 11px;">
+                        <a href="${jiraBaseUrl}/browse/${lookupKey}" target="_blank" style="color: #0052cc; font-weight: 600;">${f.key}</a>
+                        <span style="background: #667eea; color: white; padding: 1px 4px; border-radius: 2px; font-size: 10px; margin-left: 4px;">${f.points}pts</span>
+                        <span style="color: #666; margin-left: 6px;">${summary.substring(0, 70)}${summary.length > 70 ? '...' : ''}</span>
+                    </div>`;
+                });
+                html += `</div></div>`;
+            }
+
             container.innerHTML = html;
         }
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', function() {
-            // Set default plan mode to optimized if splits available
+            // Set initial plan mode state without double-rendering
             if (planData.metadata && planData.metadata.splits_applied > 0) {
-                setPlanMode('optimized');
-            } else {
-                renderDraftPlan();
+                currentPlanMode = 'optimized';
+                document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+                document.getElementById('mode-btn-optimized').classList.add('active');
             }
-            // Initialize slider visual
+            // Build flat feature list and run initial rebalance
+            orderedFeatures = getOrderedFeatures(currentPlanMode);
+            rebalancedPlan = rebalance(orderedFeatures, currentCapacityLimit);
+            renderDraftPlan();
+            // Initialize slider visual (this will also rebalance+render, but
+            // since the value is the same as default it's a no-op rebalance)
             updateCapacitySlider(80);
             renderAnalysis();
         });

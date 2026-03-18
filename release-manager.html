@@ -3467,10 +3467,10 @@
         "status": "In Progress",
         "priority": "Critical",
         "issue_type": "Feature",
-        "points": 8,
-        "original_points": 0,
-        "auto_sized": true,
-        "sizing_method": "keyword_heuristic",
+        "points": 5.0,
+        "original_points": 5.0,
+        "auto_sized": false,
+        "sizing_method": "jira_provided",
         "complexity_score": null,
         "sizing_confidence": null,
         "fix_versions": [],
@@ -12185,10 +12185,10 @@
     },
     "GA": {
       "features": 67,
-      "points": 570.0,
+      "points": 567.0,
       "capacity_status": "over_capacity",
       "color": "#dc3545",
-      "vs_median_pct": 1973
+      "vs_median_pct": 1962
     }
   },
   "3.6": {
@@ -21874,10 +21874,10 @@
         "status": "In Progress",
         "priority": "Critical",
         "issue_type": "Feature",
-        "points": 8,
-        "original_points": 0,
-        "auto_sized": true,
-        "sizing_method": "keyword_heuristic",
+        "points": 5.0,
+        "original_points": 5.0,
+        "auto_sized": false,
+        "sizing_method": "jira_provided",
         "complexity_score": null,
         "sizing_confidence": null,
         "fix_versions": [],
@@ -21893,9 +21893,9 @@
         "in_plan": false
       },
       "analysis": {
-        "phaseable": true,
-        "recommendation": "Consider phasing: DP (core feature) \u2192 TP (refinement) \u2192 GA (optimization)",
-        "complexity": "Medium"
+        "phaseable": false,
+        "recommendation": "Deliver in single release event (GA preferred)",
+        "complexity": "Low"
       }
     },
     {
@@ -50098,7 +50098,7 @@
         "percentage": 12.6
       },
       "L": {
-        "count": 491,
+        "count": 490,
         "features": [
           {
             "key": "RHAISTRAT-1322",
@@ -53325,30 +53325,6 @@
             "status_category": "planned",
             "labels": [
               "dashboard-zaffre-scrum",
-              "tech-reviewed"
-            ],
-            "release_type": null,
-            "rank": 9999,
-            "in_plan": false
-          },
-          {
-            "key": "RHAISTRAT-853",
-            "summary": "Implement Model Cache in RHOAI",
-            "status": "In Progress",
-            "priority": "Critical",
-            "issue_type": "Feature",
-            "points": 8,
-            "original_points": 0,
-            "auto_sized": true,
-            "sizing_method": "keyword_heuristic",
-            "complexity_score": null,
-            "sizing_confidence": null,
-            "fix_versions": [],
-            "target_version": "rhoai-3.4",
-            "target_end_date": null,
-            "scheduled_to": "rhoai-3.4",
-            "status_category": "planned",
-            "labels": [
               "tech-reviewed"
             ],
             "release_type": null,
@@ -62441,11 +62417,11 @@
             "in_plan": false
           }
         ],
-        "total_points": 3956.0,
-        "percentage": 45.9
+        "total_points": 3948.0,
+        "percentage": 45.8
       },
       "M": {
-        "count": 388,
+        "count": 389,
         "features": [
           {
             "key": "RHAISTRAT-1319",
@@ -64558,6 +64534,30 @@
             "status_category": "unscheduled",
             "labels": [
               "needs-tech-review"
+            ],
+            "release_type": null,
+            "rank": 9999,
+            "in_plan": false
+          },
+          {
+            "key": "RHAISTRAT-853",
+            "summary": "Implement Model Cache in RHOAI",
+            "status": "In Progress",
+            "priority": "Critical",
+            "issue_type": "Feature",
+            "points": 5.0,
+            "original_points": 5.0,
+            "auto_sized": false,
+            "sizing_method": "jira_provided",
+            "complexity_score": null,
+            "sizing_confidence": null,
+            "fix_versions": [],
+            "target_version": "rhoai-3.4",
+            "target_end_date": null,
+            "scheduled_to": "rhoai-3.4",
+            "status_category": "planned",
+            "labels": [
+              "tech-reviewed"
             ],
             "release_type": null,
             "rank": 9999,
@@ -71812,8 +71812,8 @@
             "in_plan": false
           }
         ],
-        "total_points": 1947.0,
-        "percentage": 36.3
+        "total_points": 1952.0,
+        "percentage": 36.4
       },
       "S": {
         "count": 51,
@@ -73246,11 +73246,11 @@
       }
     },
     "total_features": 1069,
-    "total_points": 7844.0,
+    "total_points": 7841.0,
     "recommendations": [
       {
         "type": "success",
-        "message": "Ideal distribution: S(35%), M(40%), L(20%), XL(<5%). Current: S(4.8%), M(36.3%), L(45.9%), XL(12.6%)",
+        "message": "Ideal distribution: S(35%), M(40%), L(20%), XL(<5%). Current: S(4.8%), M(36.4%), L(45.8%), XL(12.6%)",
         "impact": "info"
       }
     ],
@@ -78822,8 +78822,8 @@
   "insights": {
     "phasing": {
       "total": 1069,
-      "phaseable": 625,
-      "percentage": 58.5
+      "phaseable": 624,
+      "percentage": 58.4
     },
     "sizing": {
       "distribution": {
@@ -82211,7 +82211,7 @@
           "percentage": 12.6
         },
         "L": {
-          "count": 491,
+          "count": 490,
           "features": [
             {
               "key": "RHAISTRAT-1322",
@@ -85438,30 +85438,6 @@
               "status_category": "planned",
               "labels": [
                 "dashboard-zaffre-scrum",
-                "tech-reviewed"
-              ],
-              "release_type": null,
-              "rank": 9999,
-              "in_plan": false
-            },
-            {
-              "key": "RHAISTRAT-853",
-              "summary": "Implement Model Cache in RHOAI",
-              "status": "In Progress",
-              "priority": "Critical",
-              "issue_type": "Feature",
-              "points": 8,
-              "original_points": 0,
-              "auto_sized": true,
-              "sizing_method": "keyword_heuristic",
-              "complexity_score": null,
-              "sizing_confidence": null,
-              "fix_versions": [],
-              "target_version": "rhoai-3.4",
-              "target_end_date": null,
-              "scheduled_to": "rhoai-3.4",
-              "status_category": "planned",
-              "labels": [
                 "tech-reviewed"
               ],
               "release_type": null,
@@ -94554,11 +94530,11 @@
               "in_plan": false
             }
           ],
-          "total_points": 3956.0,
-          "percentage": 45.9
+          "total_points": 3948.0,
+          "percentage": 45.8
         },
         "M": {
-          "count": 388,
+          "count": 389,
           "features": [
             {
               "key": "RHAISTRAT-1319",
@@ -96671,6 +96647,30 @@
               "status_category": "unscheduled",
               "labels": [
                 "needs-tech-review"
+              ],
+              "release_type": null,
+              "rank": 9999,
+              "in_plan": false
+            },
+            {
+              "key": "RHAISTRAT-853",
+              "summary": "Implement Model Cache in RHOAI",
+              "status": "In Progress",
+              "priority": "Critical",
+              "issue_type": "Feature",
+              "points": 5.0,
+              "original_points": 5.0,
+              "auto_sized": false,
+              "sizing_method": "jira_provided",
+              "complexity_score": null,
+              "sizing_confidence": null,
+              "fix_versions": [],
+              "target_version": "rhoai-3.4",
+              "target_end_date": null,
+              "scheduled_to": "rhoai-3.4",
+              "status_category": "planned",
+              "labels": [
+                "tech-reviewed"
               ],
               "release_type": null,
               "rank": 9999,
@@ -103925,8 +103925,8 @@
               "in_plan": false
             }
           ],
-          "total_points": 1947.0,
-          "percentage": 36.3
+          "total_points": 1952.0,
+          "percentage": 36.4
         },
         "S": {
           "count": 51,
@@ -105359,11 +105359,11 @@
         }
       },
       "total_features": 1069,
-      "total_points": 7844.0,
+      "total_points": 7841.0,
       "recommendations": [
         {
           "type": "success",
-          "message": "Ideal distribution: S(35%), M(40%), L(20%), XL(<5%). Current: S(4.8%), M(36.3%), L(45.9%), XL(12.6%)",
+          "message": "Ideal distribution: S(35%), M(40%), L(20%), XL(<5%). Current: S(4.8%), M(36.4%), L(45.8%), XL(12.6%)",
           "impact": "info"
         }
       ],
@@ -114645,13 +114645,13 @@
   },
   "RHAISTRAT-853": {
     "summary": "Implement Model Cache in RHOAI",
-    "points": 8,
+    "points": 5.0,
     "product": "RHOAI",
     "issue_type": "Feature",
     "status": "In Progress",
     "priority": "Critical",
-    "auto_sized": true,
-    "sizing_method": "keyword_heuristic",
+    "auto_sized": false,
+    "sizing_method": "jira_provided",
     "complexity_score": null,
     "sizing_confidence": null,
     "release_type": null
